@@ -89,6 +89,7 @@ test_transforms:
   - type: cofai.transforms.PadToMultiple
     multiple: 64
 task_configs:
+  # Detection plans additionally support kind: det with a CocoDetectionMeter.
   - label: cls
     meter: ${metrics.cls_metrics}
 model:

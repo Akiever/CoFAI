@@ -6,14 +6,21 @@
 
 ## 1. 通用测试条件
 
-根据 AI M2462 的 CTC 讨论，通用测试条件选定如下：
+此前提案中常混用 Layer、Block 和 Slot 来描述特征提取的位置。为统一表述，参考软件采用 Slot 表示特征位置。
 
-| 项 | 取值 |
-|----|------|
-| 模型 | DINOv3 `vitl16`（`model_size=large` + `patch_size=16`） |
-| 分割点 | **Layer 23（必选）**；Layer 5 / 11 / 17 可选 |
-| 输入尺度 | 原生尺寸（padding 到 16 的整数倍） |
-| 下游任务 | 分割 / ADE20K，深度估计 / NYUv2，目标检测（未定），图像重建（未定） |
+具体来说，`Layer x` 与 `Block x` 均表示从 0 开始编号的 Transformer 计算模块。此前提案也常直接以 `Layer x` 指代该模块输出处的分割点。参考软件则采用 Slot 记法，将 `Block x` 的输出特征位置记为 `Slot (x+1)`。因此，提案中 Layer / Block 5、11、17、23 的输出位置，分别对应参考软件中的分割点 `slot6`、`slot12`、`slot18`、`slot24`。详细关系见[第 7 节](#7-backbone-与分割点slot)。
+
+根据 AI M2462 的 CTC 讨论和 AI M2489 的 CTC 建议，通用测试条件选定如下：
+
+三个任务均使用 DINOv3 `vitl16`（`model_size=large`、`patch_size=16`）。各任务的测试设置、当前提供的 Bypass 基线分割点及其他可选分割点如下：
+
+| 任务 | 数据集 | 输入尺度与预处理 | 基线分割点 | 其他可选分割点 | 主要指标 |
+|------|--------|------------------|------------|----------------|----------|
+| 语义分割 | ADE20K 验证集 | 原生尺寸，padding 到 16 的整数倍 | `slot24`、`slot6` | `slot12`、`slot18` | mIoU |
+| 深度估计 | NYUv2 测试集 | 原生尺寸，padding 到 16 的整数倍 | `slot24`、`slot6` | `slot12`、`slot18` | RMSE、AbsRel、a1 |
+| 目标检测 | COCO val 1k | 保持宽高比缩放，目标短边 1024、长边不超过 1536，再 padding 到 16 的整数倍 | `slot6` | — | AP、AP50、AP75 |
+
+图像重建任务的测试条件待定。
 
 > 注意：CTC 评测取用的最后一层特征是 **norm 之前** 的特征。
 
@@ -31,6 +38,7 @@ poetry run cofai-download examples/ctc/dinov3-ctc.manifest.txt
 ```bash
 unzip data/ADE20K.zip -d data/
 unzip data/NYU_subset_for_training_depth_head.zip -d data/
+unzip data/coco_val_1k.zip -d data/
 ```
 
 解压后的最终目录结构如下：
@@ -42,15 +50,20 @@ CoFAI/
 │   ├─ ADEChallengeData2016/
 │   │   ├─ images/
 │   │   └─ annotations/
-│   └─ NYU/
-│       ├─ train/  test/
-│       └─ nyu_train.txt  nyu_test.txt
+│   ├─ NYU/
+│   │   ├─ train/  test/
+│   │   └─ nyu_train.txt  nyu_test.txt
+│   └─ coco_val_1k/
+│       ├─ val2017/
+│       ├─ annotations/instances_val2017.json
+│       └─ coco_val_1k.txt
 │
 ├─ weights/                               # 预训练权重
 │   └─ dinov3/
 │       ├─ backbone/
 │       ├─ semseg_head/
-│       └─ dpt_head/
+│       ├─ dpt_head/
+│       └─ det_head/
 ```
 
 ## 3. 运行测试
@@ -60,13 +73,25 @@ CoFAI/
 通过统一评测引擎 `cofai-eval` 执行任一 plan，结果（bpp / bpfp / mIoU 或 RMSE 等）写入 `logs/<plan-name>/result.json`：
 
 ```bash
-# ADE20K 语义分割（Bypass 基线）
+# ADE20K 语义分割（Bypass 基线，slot24）
 CUDA_VISIBLE_DEVICES=0 poetry run cofai-eval \
   conf/plan/ade20k-val__dinov3-vitl16-slot24__Bypass__semseg.yaml
 
-# NYUv2 深度估计（Bypass 基线）
+# NYUv2 深度估计（Bypass 基线，slot24）
 CUDA_VISIBLE_DEVICES=0 poetry run cofai-eval \
   conf/plan/nyuv2-val__dinov3-vitl16-slot24__Bypass__depth.yaml
+
+# ADE20K 语义分割（Bypass 基线，slot6）
+CUDA_VISIBLE_DEVICES=0 poetry run cofai-eval \
+  conf/plan/ade20k-val__dinov3-vitl16-slot6__Bypass__semseg.yaml
+
+# NYUv2 深度估计（Bypass 基线，slot6）
+CUDA_VISIBLE_DEVICES=0 poetry run cofai-eval \
+  conf/plan/nyuv2-val__dinov3-vitl16-slot6__Bypass__depth.yaml
+
+# COCO val 1k 检测（Bypass，slot6，short-side 1024，Plain-DETR）
+CUDA_VISIBLE_DEVICES=0 poetry run cofai-eval \
+  conf/plan/coco-val1k__dinov3-vitl16-slot6__Bypass__det.yaml
 ```
 
 需要统计 **latent codec 复杂度**（参数量、编码/解码 FLOPs、codec 耗时）时，加上 `args.profile=true`；结果会写入 `result.json` 末尾的 `codec_*` 字段（`codec_params`、`codec_enc_flops`、`codec_dec_flops`、`codec_enc_time`、`codec_dec_time`）。`args.max_samples` 同样生效，不设则跑完整数据集后取平均。
@@ -77,12 +102,15 @@ CUDA_VISIBLE_DEVICES=0 poetry run cofai-eval \
   args.profile=true
 ```
 
-参考结果（Bypass 不压缩，作为各任务的精度上界）：
+以下为上述 Bypass plan 使用下载清单中权重的全量评测参考结果：ADE20K 验证集 2,000 张、NYUv2 测试集 654 张、COCO 子集 1,000 张。Bypass 不压缩，bpp 为 0；mIoU 和 AP 均以 0–1 表示。
 
 | Plan | bpp | 指标 |
 |------|-----|------|
 | `ade20k-val__dinov3-vitl16-slot24__Bypass__semseg` | 0.0 | mIoU 0.5309 |
-| `nyuv2-val__dinov3-vitl16-slot24__Bypass__depth` | 0.0 | RMSE 0.3477 |
+| `nyuv2-val__dinov3-vitl16-slot24__Bypass__depth` | 0.0 | RMSE 0.3476 |
+| `ade20k-val__dinov3-vitl16-slot6__Bypass__semseg` | 0.0 | mIoU 0.5309 |
+| `nyuv2-val__dinov3-vitl16-slot6__Bypass__depth` | 0.0 | RMSE 0.3476 |
+| `coco-val1k__dinov3-vitl16-slot6__Bypass__det` | 0.0 | AP 0.5605 / AP50 0.7625 |
 
 ## 4. 统一架构总览
 
@@ -113,7 +141,7 @@ CUDA_VISIBLE_DEVICES=0 poetry run cofai-eval \
 | `MPC` | `VbrVitUnionLatentCodec` | 可变码率 ViT union 熵模型 |
 | `RFC` | `MLoREFeatureCodec` | MLoRE 多任务低秩专家特征编码 |
 
-- **head**：下游任务预测头，支持 `cls` / `seg` / `semseg` / `depth` / `rae`（特征重建），由提供的 `heads` 决定。
+- **head**：下游任务预测头，支持 `cls` / `seg` / `semseg` / `depth` / `det` / `rae`（特征重建），由提供的 `heads` 决定。
 
 
 ### `DinoSlideFeatureCodecModel`（滑窗子类，CTC 一般不用）
@@ -139,34 +167,37 @@ backbone 统一用 timm 实现：`Dinov2TimmBackbone` / `Dinov3TimmBackbone`（`
 
 ![DINOv3 Slot Description](./vit-slot-formulation.png)
 
-slot 约定：transformer block 从 0 开始计数记作 `Layer n`，其输入特征记作 `t_n`（对应 `Slot n`），输出特征记作 `t_(n+1)`（对应 `Slot n+1`），即
+`Layer x` 与 `Block x` 是同一个 Transformer block 的两种称呼，编号从 0 开始。slot 则表示 block 之间的特征边界：`Block x` 的输入特征 `t_x` 位于 `slot x`，输出特征 `t_(x+1)` 位于 `slot(x+1)`，即
 
-\[ t_{n+1} = \mathrm{Layer}_n(t_n) \]
+\[ t_{x+1} = \mathrm{Block}_x(t_x) \]
 
-- `slotNN` = `blocks[:NN]`：提取特征用前 NN 个 block，解码特征用其余 block。一律用**正整数**（不再用负数 / null）。
-- `slotNNn` = 在第 NN 层之后**再过一次 `norm`** 作为提取的特征（不常用）。
+- 参考软件统一用 slot 表示分割点。`slotNN` 对应配置 `slot: NN`：编码侧运行 `blocks[:NN]`，解码侧从 `blocks[NN:]` 继续运行。当前 CTC 配置使用正整数 slot。
+- 文件名中的 `slotNNn` 表示在 `slotNN` 处额外经过一次 `norm` 的特征，分割点编号仍为 NN。
 
 据此，CTC 的分割点映射为：
 
-| CTC 分割点 | slot |
-|------------|------|
-| Layer 23（必选） | `slot24` |
-| Layer 17 | `slot18` |
-| Layer 11 | `slot12` |
-| Layer 5  | `slot6`  |
+| 参考软件分割点 | 对应的 Layer / Block 输出 |
+|----------------|---------------------------|
+| `slot24` | Layer 23 / Block 23 |
+| `slot18` | Layer 17 / Block 17 |
+| `slot12` | Layer 11 / Block 11 |
+| `slot6` | Layer 5 / Block 5 |
 
+例如，`slot6` 将编码侧与解码侧分为前 6 个 block 和后 18 个 block，对应 Block 5 的输出边界。
 
+分割和深度估计的任务头使用 `slot24` 处的特征（`n_last_blocks: 1`），在 `slot6` 与 `slot24` 分割时共用同一套任务头权重；检测任务头使用 `slot6`、`slot12`、`slot18`、`slot24` 处的四层中间特征。任务头特征选择参数 `n_last_blocks` 中的列表仍按从 0 开始的 block 索引填写，因此检测配置为 `[5, 11, 17, 23]`。
 
 ## 8. 下游任务头与权重
 
-CTC 当前落地的两个任务头（见 `conf/heads/dinov3_head.yaml`）：
+CTC 当前落地的任务头（见 `conf/heads/dinov3_head.yaml`）：
 
 | 任务 | 数据集 | head 类型 | 预训练权重 |
 |------|--------|-----------|------------|
 | 语义分割 | ADE20K | `Dinov3SegmentationHead`（150 类，linear head） | `weights/dinov3/semseg_head/dinov3_vitl16_semseg_ade20k_linear_head.pth` |
 | 深度估计 | NYUv2 | `Dinov3DepthHead`（linear head，depth 0.001–10.0） | `weights/dinov3/dpt_head/dinov3_vitl16_depth_nyuv2_linear_head.pth` |
+| 目标检测 | COCO val 1k | `Dinov3PlainDETRHead`（四层中间特征 + Plain-DETR） | `weights/dinov3/det_head/plain_detr_dinov3_vitl16_checkpoint_best.pth` |
 
-目标检测、图像重建任务头待定。
+图像重建任务头待定。
 
 ## 9. Plan 组合与命名
 
@@ -186,11 +217,14 @@ CTC 当前落地的两个任务头（见 `conf/heads/dinov3_head.yaml`）：
 - `codec`：`Bypass` / `VQFC` / `ORFC` / `VTM` / `VTC` / `MPC` / `RFC`，可变码率加 `-vbr`。
 - `head`：`cls` / `semseg` / `depth` / `rae` 等，`-lastN` 表示用最后 N 个 block 的特征（N≠1 时标注）。
 
-本 CTC 场景的基线（不压缩，精度天花板）示例：
+本 CTC 场景的 Bypass 基线（不压缩）示例：
 
 ```
 ade20k-val__dinov3-vitl16-slot24__Bypass__semseg.yaml
 nyuv2-val__dinov3-vitl16-slot24__Bypass__depth.yaml
+ade20k-val__dinov3-vitl16-slot6__Bypass__semseg.yaml
+nyuv2-val__dinov3-vitl16-slot6__Bypass__depth.yaml
+coco-val1k__dinov3-vitl16-slot6__Bypass__det.yaml
 ```
 
 plan 内部结构（节选）：
@@ -202,7 +236,7 @@ model:
     type: cofai.backbone.Dinov3TimmBackbone
     model_size: large
     patch_size: 16
-    slot: 24                                     # Layer 23 输出
+    slot: 24
   dino_codec:
     type: cofai.latent_codecs.BypassLatentCodec  # 基线不压缩
   heads:
