@@ -24,7 +24,7 @@ The original checkpoint files are saved under `${PROJECT_ROOT}/weights/DS-VFC/lo
 | `DS-VFC-qwen3vl-8b-ins-slot9-Q0.2-epoch016.pth` | 16 |
 | `DS-VFC-qwen3vl-8b-ins-slot9-Q0.2-epoch028.pth` | 28 |
 
-`Q` denotes the independent training rate weight, not an inference QP. The duplicate Q0.2/Q0.6 files are different epochs. The proposal table does not identify the epoch for each MMStar row; matching an epoch to a reported point requires evaluation rather than assuming filename order.
+`Q` denotes the independent training rate weight, not an inference QP. The duplicate Q0.2/Q0.6 files are different epochs.
 
 ## MMStar evaluation
 
@@ -47,19 +47,4 @@ Results follow the standard `logs/<plan-name>/result.json` layout; multi-run wri
 poetry run cofai-eval conf/plan/mmstar__qwen3vl-8b-ins-slot9__Bypass__vqa.yaml
 ```
 
-## Results reported in the proposal
-
-These values are from **Table 6 of AI M2482_v2**, not measurements produced by this integration. The author confirmed that the old table used likelihood-estimated rates. Its Bypass is 67.40%; the CoFAI CTC reference is 67.27%.
-
-| Method | Estimated bpp | Estimated bpfp | MMStar accuracy |
-| --- | ---: | ---: | ---: |
-| Bypass | 0 | 0 | 67.40% |
-| DS-VFC, λ=0.6 | 0.621 | 0.022 | 66.60% |
-| DS-VFC, λ=0.6 | 0.668 | 0.023 | 66.73% |
-| DS-VFC, λ=0.4 | 0.816 | 0.028 | 66.93% |
-| DS-VFC, λ=0.2 | 1.330 | 0.045 | 67.80% |
-| DS-VFC, λ=0.2 | 1.399 | 0.047 | 67.87% |
-
-Table 5 also reports ODinW-13 mAP 0.449–0.459 at estimated bpp 0.423–0.898, versus Bypass 0.442. ODinW evaluation and online training are outside this integration.
-
-The proposal's original evaluation used an SDPA backbone and a Transformers 4.x interface. CoFAI's existing CTC implementation uses its established backbone and attention path. Consequently, old table values are a source reference, not a promise of pointwise equality across those inference implementations. Real-rate results and timings must be listed separately from the old estimated-rate table; its reported latency overhead below 4% does not establish real entropy-coding latency.
+The proposal used likelihood-estimated rates; the default plan measures actual entropy payloads. This example uses CoFAI's existing CTC backbone and attention path, which differs from the proposal's SDPA/Transformers 4.x inference environment.
